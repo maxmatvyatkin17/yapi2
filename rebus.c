@@ -22,12 +22,18 @@ static Word g_words[MAX_OPERANDS + 1];
 static char g_ops[MAX_OPERANDS];
 static int g_noperands;
 
+static int g_word_id[MAX_OPERANDS + 1];
+static int g_unique[MAX_OPERANDS + 1];
+static int g_nunique;
+static int g_is_leading[MAX_LETTERS];
+
 static const char *g_puzzle;
 static char g_letters[26 + 1];
 static int g_nletters;
 static int g_index_of[26];
 static int g_digit[MAX_LETTERS];
 static int g_used[10];
+static int g_zero_letter;
 static char g_candidate[MAX_PUZZLE_LEN + 1];
 
 static int is_op(char c) { return c == '+' || c == '-' || c == '*' || c == '/'; }
@@ -91,6 +97,19 @@ static int parse_puzzle(const char *s)
     for (int i = 0; i <= g_noperands; i++)
         for (int j = 0; j < g_words[i].len; j++)
             g_words[i].idx[j] = g_index_of[g_words[i].text[j] - 'A'];
+
+    g_nunique = 0;
+    memset(g_is_leading, 0, sizeof g_is_leading);
+    for (int i = 0; i <= g_noperands; i++) {
+        int u = 0;
+        while (u < g_nunique && strcmp(g_words[g_unique[u]].text, g_words[i].text) != 0)
+            u++;
+        if (u == g_nunique)
+            g_unique[g_nunique++] = i;
+        g_word_id[i] = u;
+        if (g_words[i].len > 1 && g_words[i].idx[0] < MAX_LETTERS)
+            g_is_leading[g_words[i].idx[0]] = 1;
+    }
     return 1;
 }
 
@@ -104,14 +123,17 @@ static long long word_value(const Word *w)
 
 static int check_assignment(void)
 {
-    for (int i = 0; i <= g_noperands; i++)
-        if (g_words[i].len > 1 && g_digit[g_words[i].idx[0]] == 0)
-            return 0;
+    if (g_zero_letter >= 0 && g_is_leading[g_zero_letter])
+        return 0;
 
-    i128 total = 0, term = word_value(&g_words[0]);
+    long long value[MAX_OPERANDS + 1];
+    for (int u = 0; u < g_nunique; u++)
+        value[u] = word_value(&g_words[g_unique[u]]);
+
+    i128 total = 0, term = value[g_word_id[0]];
     int sign = 1;
     for (int i = 1; i < g_noperands; i++) {
-        long long v = word_value(&g_words[i]);
+        long long v = value[g_word_id[i]];
         char op = g_ops[i - 1];
         if (op == '*') {
             if (__builtin_mul_overflow(term, (i128)v, &term))
@@ -129,7 +151,7 @@ static int check_assignment(void)
     }
     if (__builtin_add_overflow(total, sign * term, &total))
         return 0;
-    return total == word_value(&g_words[g_noperands]);
+    return total == value[g_word_id[g_noperands]];
 }
 
 static void build_candidate(void)
@@ -155,8 +177,12 @@ static int search(int pos)
             continue;
         g_used[d] = 1;
         g_digit[pos] = d;
+        if (d == 0)
+            g_zero_letter = pos;
         if (search(pos + 1))
             return 1;
+        if (d == 0)
+            g_zero_letter = -1;
         g_used[d] = 0;
     }
     return 0;
@@ -174,6 +200,7 @@ int solve_rebus(const char *puzzle, char *out, size_t out_size)
 
     g_puzzle = puzzle;
     memset(g_used, 0, sizeof g_used);
+    g_zero_letter = -1;
     if (!search(0))
         return 0;
 
