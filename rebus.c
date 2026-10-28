@@ -33,7 +33,6 @@ static int g_nletters;
 static int g_index_of[26];
 static int g_digit[MAX_LETTERS];
 static int g_used[10];
-static int g_zero_letter;
 static char g_candidate[MAX_PUZZLE_LEN + 1];
 
 static int is_op(char c) { return c == '+' || c == '-' || c == '*' || c == '/'; }
@@ -123,9 +122,6 @@ static long long word_value(const Word *w)
 
 static int check_assignment(void)
 {
-    if (g_zero_letter >= 0 && g_is_leading[g_zero_letter])
-        return 0;
-
     long long value[MAX_OPERANDS + 1];
     for (int u = 0; u < g_nunique; u++)
         value[u] = word_value(&g_words[g_unique[u]]);
@@ -172,17 +168,13 @@ static int search(int pos)
 {
     if (pos == g_nletters)
         return check_assignment();
-    for (int d = 0; d <= 9; d++) {
+    for (int d = g_is_leading[pos] ? 1 : 0; d <= 9; d++) {
         if (g_used[d])
             continue;
         g_used[d] = 1;
         g_digit[pos] = d;
-        if (d == 0)
-            g_zero_letter = pos;
         if (search(pos + 1))
             return 1;
-        if (d == 0)
-            g_zero_letter = -1;
         g_used[d] = 0;
     }
     return 0;
@@ -200,7 +192,6 @@ int solve_rebus(const char *puzzle, char *out, size_t out_size)
 
     g_puzzle = puzzle;
     memset(g_used, 0, sizeof g_used);
-    g_zero_letter = -1;
     if (!search(0))
         return 0;
 
