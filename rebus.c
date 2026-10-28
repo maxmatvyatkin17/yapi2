@@ -14,6 +14,7 @@ typedef __int128 i128;
 
 typedef struct {
     char text[MAX_WORD_LEN + 1];
+    int idx[MAX_WORD_LEN];
     int len;
 } Word;
 
@@ -24,6 +25,7 @@ static int g_noperands;
 static const char *g_puzzle;
 static char g_letters[26 + 1];
 static int g_nletters;
+static int g_index_of[26];
 static int g_digit[MAX_LETTERS];
 static int g_used[10];
 static char g_candidate[MAX_PUZZLE_LEN + 1];
@@ -81,31 +83,29 @@ static int parse_puzzle(const char *s)
     g_letters[0] = '\0';
     for (const char *c = s; *c; c++) {
         if (isupper((unsigned char)*c) && !strchr(g_letters, *c)) {
+            g_index_of[*c - 'A'] = g_nletters;
             g_letters[g_nletters++] = *c;
             g_letters[g_nletters] = '\0';
         }
     }
+    for (int i = 0; i <= g_noperands; i++)
+        for (int j = 0; j < g_words[i].len; j++)
+            g_words[i].idx[j] = g_index_of[g_words[i].text[j] - 'A'];
     return 1;
-}
-
-static int digit_of(char c)
-{
-    int idx = (int)(strchr(g_letters, c) - g_letters);
-    return g_digit[idx];
 }
 
 static long long word_value(const Word *w)
 {
     long long v = 0;
     for (int i = 0; i < w->len; i++)
-        v = v * 10 + digit_of(w->text[i]);
+        v = v * 10 + g_digit[w->idx[i]];
     return v;
 }
 
 static int check_assignment(void)
 {
     for (int i = 0; i <= g_noperands; i++)
-        if (g_words[i].len > 1 && digit_of(g_words[i].text[0]) == 0)
+        if (g_words[i].len > 1 && g_digit[g_words[i].idx[0]] == 0)
             return 0;
 
     i128 total = 0, term = word_value(&g_words[0]);
@@ -138,8 +138,7 @@ static void build_candidate(void)
     for (i = 0; g_puzzle[i]; i++) {
         char c = g_puzzle[i];
         if (isupper((unsigned char)c)) {
-            int idx = (int)(strchr(g_letters, c) - g_letters);
-            g_candidate[i] = (char)('0' + g_digit[idx]);
+            g_candidate[i] = (char)('0' + g_digit[g_index_of[c - 'A']]);
         } else {
             g_candidate[i] = c;
         }
