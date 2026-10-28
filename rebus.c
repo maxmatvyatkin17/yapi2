@@ -1,4 +1,5 @@
 #include <ctype.h>
+#include <math.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
@@ -260,6 +261,78 @@ static void build_candidate(void)
     g_candidate[i] = '\0';
 }
 
+static int check_bounds(void)
+{
+    int lo_d = -1, lo_nz = -1, hi_d = -1;
+    for (int d = 0; d <= 9; d++) {
+        if (g_used[d])
+            continue;
+        if (lo_d < 0)
+            lo_d = d;
+        if (d > 0 && lo_nz < 0)
+            lo_nz = d;
+        hi_d = d;
+    }
+    if (lo_d < 0)
+        return 1;
+    if (lo_nz < 0)
+        lo_nz = lo_d;
+
+    long double wlo[MAX_OPERANDS + 1], whi[MAX_OPERANDS + 1];
+    for (int u = 0; u < g_nunique; u++) {
+        const Word *w = &g_words[g_unique[u]];
+        long double lo = 0, hi = 0;
+        for (int i = 0; i < w->len; i++) {
+            int dg = g_digit[w->idx[i]];
+            if (dg >= 0) {
+                lo = lo * 10 + dg;
+                hi = hi * 10 + dg;
+            } else {
+                lo = lo * 10 + (i == 0 && w->len > 1 ? lo_nz : lo_d);
+                hi = hi * 10 + hi_d;
+            }
+        }
+        wlo[u] = lo;
+        whi[u] = hi;
+    }
+
+    long double tlo = wlo[g_word_id[0]], thi = whi[g_word_id[0]];
+    long double slo = 0, shi = 0;
+    int neg = 0;
+    for (int i = 1; i <= g_noperands; i++) {
+        char op = i < g_noperands ? g_ops[i - 1] : '=';
+        long double vlo = 0, vhi = 0;
+        if (i < g_noperands) {
+            vlo = wlo[g_word_id[i]];
+            vhi = whi[g_word_id[i]];
+        }
+        if (op == '*') {
+            tlo *= vlo;
+            thi *= vhi;
+        } else if (op == '/') {
+            if (vhi == 0)
+                return 0;
+            tlo /= vhi;
+            thi = vlo > 0 ? thi / vlo : HUGE_VALL;
+        } else {
+            if (neg) {
+                slo -= thi;
+                shi -= tlo;
+            } else {
+                slo += tlo;
+                shi += thi;
+            }
+            neg = (op == '-');
+            tlo = vlo;
+            thi = vhi;
+        }
+    }
+
+    long double rlo = wlo[g_word_id[g_noperands]], rhi = whi[g_word_id[g_noperands]];
+    long double eps = 1e-12L * (fabsl(rhi) + fabsl(slo) + fabsl(shi)) + 0.5L;
+    return !(shi < rlo - eps || slo > rhi + eps);
+}
+
 static int search(int pos)
 {
     if (pos == g_nletters)
@@ -272,10 +345,11 @@ static int search(int pos)
         if (level && !check_modulo(level))
             continue;
         g_used[d] = 1;
-        if (search(pos + 1))
+        if (check_bounds() && search(pos + 1))
             return 1;
         g_used[d] = 0;
     }
+    g_digit[letter] = -1;
     return 0;
 }
 
@@ -292,6 +366,7 @@ int solve_rebus(const char *puzzle, char *out, size_t out_size)
     g_puzzle = puzzle;
     build_order();
     memset(g_used, 0, sizeof g_used);
+    memset(g_digit, -1, sizeof g_digit);
     if (!search(0))
         return 0;
 
