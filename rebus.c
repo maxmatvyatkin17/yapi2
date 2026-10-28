@@ -134,13 +134,15 @@ static void build_order(void)
 
     memset(g_check_level, 0, sizeof g_check_level);
     for (int k = 1; k <= maxlen; k++) {
-        for (int i = 0; i <= g_noperands; i++) {
-            const Word *w = &g_words[i];
-            if (w->len >= k) {
-                int l = w->idx[w->len - k];
-                if (!placed[l]) {
-                    placed[l] = 1;
-                    g_order[n++] = l;
+        for (int pass = 1; pass >= 0; pass--) {
+            for (int i = 0; i <= g_noperands; i++) {
+                const Word *w = &g_words[i];
+                if (w->len >= k) {
+                    int l = w->idx[w->len - k];
+                    if (!placed[l] && g_is_leading[l] == pass) {
+                        placed[l] = 1;
+                        g_order[n++] = l;
+                    }
                 }
             }
         }
