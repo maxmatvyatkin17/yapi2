@@ -1,5 +1,4 @@
 #include <ctype.h>
-#include <stdlib.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
@@ -89,58 +88,48 @@ static int parse_puzzle(const char *s)
     return 1;
 }
 
-static const char *read_number(const char *p, long long *value)
+static int digit_of(char c)
 {
-    char *end;
-    p = skip_spaces(p);
-    if (!isdigit((unsigned char)*p))
-        return NULL;
-    if (p[0] == '0' && isdigit((unsigned char)p[1]))
-        return NULL;
-    *value = strtoll(p, &end, 10);
-    return end;
+    int idx = (int)(strchr(g_letters, c) - g_letters);
+    return g_digit[idx];
 }
 
-static int is_valid_equation(const char *s)
+static long long word_value(const Word *w)
 {
-    i128 total = 0, term;
-    long long v;
-    int sign = 1;
-    const char *p = read_number(s, &v);
-    if (!p)
-        return 0;
-    term = v;
+    long long v = 0;
+    for (int i = 0; i < w->len; i++)
+        v = v * 10 + digit_of(w->text[i]);
+    return v;
+}
 
-    for (;;) {
-        p = skip_spaces(p);
-        char op = *p++;
-        if (op == '*' || op == '/') {
-            p = read_number(p, &v);
-            if (!p)
+static int check_assignment(void)
+{
+    for (int i = 0; i <= g_noperands; i++)
+        if (g_words[i].len > 1 && digit_of(g_words[i].text[0]) == 0)
+            return 0;
+
+    i128 total = 0, term = word_value(&g_words[0]);
+    int sign = 1;
+    for (int i = 1; i < g_noperands; i++) {
+        long long v = word_value(&g_words[i]);
+        char op = g_ops[i - 1];
+        if (op == '*') {
+            if (__builtin_mul_overflow(term, (i128)v, &term))
                 return 0;
-            if (op == '*') {
-                if (__builtin_mul_overflow(term, (i128)v, &term))
-                    return 0;
-            } else {
-                if (v == 0 || term % v != 0)
-                    return 0;
-                term /= v;
-            }
+        } else if (op == '/') {
+            if (v == 0 || term % v != 0)
+                return 0;
+            term /= v;
         } else {
             if (__builtin_add_overflow(total, sign * term, &total))
                 return 0;
-            if (op == '=')
-                break;
             sign = (op == '+') ? 1 : -1;
-            p = read_number(p, &v);
-            if (!p)
-                return 0;
             term = v;
         }
     }
-
-    p = read_number(p, &v);
-    return p && total == v;
+    if (__builtin_add_overflow(total, sign * term, &total))
+        return 0;
+    return total == word_value(&g_words[g_noperands]);
 }
 
 static void build_candidate(void)
@@ -160,10 +149,8 @@ static void build_candidate(void)
 
 static int search(int pos)
 {
-    if (pos == g_nletters) {
-        build_candidate();
-        return is_valid_equation(g_candidate);
-    }
+    if (pos == g_nletters)
+        return check_assignment();
     for (int d = 0; d <= 9; d++) {
         if (g_used[d])
             continue;
@@ -191,6 +178,7 @@ int solve_rebus(const char *puzzle, char *out, size_t out_size)
     if (!search(0))
         return 0;
 
+    build_candidate();
     strcpy(out, g_candidate);
     return 1;
 }
