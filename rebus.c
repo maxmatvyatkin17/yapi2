@@ -10,7 +10,11 @@
 #define MAX_WORD_LEN 18
 #define MAX_LETTERS 10
 
+#define MAX_MOD_DIGITS 18
+
 typedef __int128 i128;
+typedef unsigned long long u64;
+typedef unsigned __int128 u128;
 
 typedef struct {
     char text[MAX_WORD_LEN + 1];
@@ -26,6 +30,11 @@ static int g_word_id[MAX_OPERANDS + 1];
 static int g_unique[MAX_OPERANDS + 1];
 static int g_nunique;
 static int g_is_leading[MAX_LETTERS];
+static int g_has_div;
+
+static int g_order[MAX_LETTERS];
+static int g_check_level[MAX_LETTERS];
+static u64 g_pow10[MAX_MOD_DIGITS + 1];
 
 static const char *g_puzzle;
 static char g_letters[26 + 1];
@@ -109,7 +118,94 @@ static int parse_puzzle(const char *s)
         if (g_words[i].len > 1 && g_words[i].idx[0] < MAX_LETTERS)
             g_is_leading[g_words[i].idx[0]] = 1;
     }
+    g_has_div = memchr(g_ops, '/', g_noperands - 1) != NULL;
     return 1;
+}
+
+static void build_order(void)
+{
+    int placed[MAX_LETTERS] = {0};
+    int n = 0, maxlen = 0;
+
+    for (int i = 0; i <= g_noperands; i++)
+        if (g_words[i].len > maxlen)
+            maxlen = g_words[i].len;
+
+    memset(g_check_level, 0, sizeof g_check_level);
+    for (int k = 1; k <= maxlen; k++) {
+        for (int i = 0; i <= g_noperands; i++) {
+            const Word *w = &g_words[i];
+            if (w->len >= k) {
+                int l = w->idx[w->len - k];
+                if (!placed[l]) {
+                    placed[l] = 1;
+                    g_order[n++] = l;
+                }
+            }
+        }
+        if (k <= MAX_MOD_DIGITS && n > 0)
+            g_check_level[n - 1] = k;
+    }
+
+    g_pow10[0] = 1;
+    for (int k = 1; k <= MAX_MOD_DIGITS; k++)
+        g_pow10[k] = g_pow10[k - 1] * 10;
+}
+
+static u64 mulmod(u64 a, u64 b, u64 m)
+{
+    if (m <= 1000000000ULL)
+        return a * b % m;
+    return (u64)((u128)a * b % m);
+}
+
+static int check_modulo(int k)
+{
+    u64 m = g_pow10[k];
+    u64 r[MAX_OPERANDS + 1];
+
+    for (int u = 0; u < g_nunique; u++) {
+        const Word *w = &g_words[g_unique[u]];
+        u64 v = 0;
+        for (int i = w->len > k ? w->len - k : 0; i < w->len; i++)
+            v = v * 10 + g_digit[w->idx[i]];
+        r[u] = v;
+    }
+
+    u64 num[MAX_OPERANDS], den[MAX_OPERANDS];
+    int neg[MAX_OPERANDS];
+    int t = 0;
+    num[0] = r[g_word_id[0]];
+    den[0] = 1;
+    neg[0] = 0;
+    for (int i = 1; i < g_noperands; i++) {
+        u64 v = r[g_word_id[i]];
+        char op = g_ops[i - 1];
+        if (op == '*') {
+            num[t] = mulmod(num[t], v, m);
+        } else if (op == '/') {
+            den[t] = mulmod(den[t], v, m);
+        } else {
+            t++;
+            num[t] = v;
+            den[t] = 1;
+            neg[t] = (op == '-');
+        }
+    }
+    t++;
+
+    u64 lhs = 0, rhs = r[g_word_id[g_noperands]];
+    for (int i = 0; i < t; i++) {
+        u64 x = num[i];
+        if (g_has_div) {
+            for (int j = 0; j < t; j++)
+                if (j != i)
+                    x = mulmod(x, den[j], m);
+            rhs = mulmod(rhs, den[i], m);
+        }
+        lhs = neg[i] ? (lhs + m - x) % m : (lhs + x) % m;
+    }
+    return lhs == rhs;
 }
 
 static long long word_value(const Word *w)
@@ -168,11 +264,14 @@ static int search(int pos)
 {
     if (pos == g_nletters)
         return check_assignment();
-    for (int d = g_is_leading[pos] ? 1 : 0; d <= 9; d++) {
+    int letter = g_order[pos], level = g_check_level[pos];
+    for (int d = g_is_leading[letter] ? 1 : 0; d <= 9; d++) {
         if (g_used[d])
             continue;
+        g_digit[letter] = d;
+        if (level && !check_modulo(level))
+            continue;
         g_used[d] = 1;
-        g_digit[pos] = d;
         if (search(pos + 1))
             return 1;
         g_used[d] = 0;
@@ -191,6 +290,7 @@ int solve_rebus(const char *puzzle, char *out, size_t out_size)
         return 0;
 
     g_puzzle = puzzle;
+    build_order();
     memset(g_used, 0, sizeof g_used);
     if (!search(0))
         return 0;
